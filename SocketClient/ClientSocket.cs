@@ -68,7 +68,7 @@ namespace SocketClient
         /// <param name="dataBuffer">Byte buffer to fill with string message</param>
         /// <param name="message">String message to copy</param>
 
-        static public void FormatBuffer(byte[] dataBuffer, byte[] byteMessage)
+        static public void BufferFormatting(byte[] dataBuffer, byte[] byteMessage)
         {
             //byte[] byteMessage = System.Text.Encoding.ASCII.GetBytes(message);
             int index = 0;
@@ -229,7 +229,7 @@ namespace SocketClient
             Console.WriteLine("DNP3 data using String Builder " +sb.ToString());
 
             //FormatBuffer(sendBuffer, textMessage);
-            FormatBuffer(sendBuffer, ll.LinkData);
+            BufferFormatting(sendBuffer, ll.LinkData);
             try
             {
                 // Try to resolve the remote host name or address
