@@ -40,6 +40,7 @@
 //
 
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -63,10 +64,9 @@ namespace SimpleSocketCS
         /// This routine repeatedly copies a string message into a byte array until filled.
         /// </summary>
         /// <param name="dataBuffer">Byte buffer to fill with string message</param>
-        /// <param name="message">String message to copy</param>
-        static public void FormatBuffer(byte[] dataBuffer, string message)
-        {
-            byte[] byteMessage = System.Text.Encoding.ASCII.GetBytes(message);
+        /// <param name="byteMessage">DNP3 message to copy</param>
+        static public void BufferFormatting(ref byte[] dataBuffer, byte[] byteMessage)
+        {            
             int index = 0;
             // First convert the string to bytes and then copy into send buffer
             while (index < dataBuffer.Length)
@@ -78,13 +78,14 @@ namespace SimpleSocketCS
                     // Make sure we don't go past the send buffer length
                     if (index >= dataBuffer.Length)
                     {
+                        dataBuffer = dataBuffer.Where((v, i) => i < byteMessage.Length).ToArray();
                         break;
                     }
                 }
             }
         }
 
-        static void deserializeDNP3(byte[] buffer)
+        static void deserializeDNP3(ref byte[] buffer)
         {
             DNP3Simple.LinkLayer ll = new DNP3Simple.LinkLayer();
             ll.deserialize(ref buffer);
@@ -107,7 +108,39 @@ namespace SimpleSocketCS
             }
             sb.Append(" }");
             Console.WriteLine("DNP3 Application request " + sb.ToString());
+            DNP3Response(tl.seq, ll.source, ll.destination, ref buffer);
 
+
+        }
+
+        static void DNP3Response(byte transportSeq, UInt16 src, UInt16 dest, ref byte[] buffer)
+        {
+            // we will send the DNP3 request
+            DNP3Simple.ApplicationLayer al = new DNP3Simple.ApplicationLayer();
+            al.InternalIndications = 0x8000; // Device Restart for READ binary input change REQUEST
+            byte[] data = new byte[]{ 0x00, 0x00 };
+            data[1] = (byte)(al.InternalIndications & 0xFF);
+            data[0] = (byte)((al.InternalIndications >> 8) & 0xFF);
+            al.ApplicationData = data;
+            al.FunctionCode = 0x81; // Function Code 81 is for RESPONSE
+            al.ApplicationControl = 0xc2;
+            al.serialize(ref al.ApplicationData);
+
+            DNP3Simple.TransportLayer tl = new DNP3Simple.TransportLayer();
+            tl.TransportData = al.ApplicationData;
+            tl.seq = (byte)(transportSeq + 1);
+            tl.FIN = 1;
+            tl.FIR = 1;
+            tl.serialize(ref tl.TransportData);
+
+            DNP3Simple.LinkLayer ll = new DNP3Simple.LinkLayer();
+            ll.LinkData = tl.TransportData;
+            ll.source = dest;
+            ll.destination = src;
+            ll.controlByte = 0x44; // Unconfirmed User data
+            ll.serialize(ref ll.LinkData);
+
+            buffer = ll.LinkData;
         }
 
         /// <summary>
@@ -146,7 +179,7 @@ namespace SimpleSocketCS
         static void Main(string[] args)
         {
             string textMessage = "Server: ServerResponse";
-            int localPort = 5150, sendCount = 10, bufferSize = 4096;
+            int localPort = 5150, sendCount = 1, bufferSize = 4096;
             IPAddress localAddress = IPAddress.Any;
             SocketType sockType = SocketType.Stream;
             ProtocolType sockProtocol = ProtocolType.Tcp;
@@ -218,7 +251,6 @@ namespace SimpleSocketCS
                 Socket clientSocket;
                 byte[] receiveBuffer = new byte[bufferSize], sendBuffer = new byte[bufferSize];
                 int rc;
-                FormatBuffer(sendBuffer, textMessage);
                 // Create the server socket
                 serverSocket = new Socket(localAddress.AddressFamily, sockType, sockProtocol);
                 Console.WriteLine("Server: Socket() is OK...");
@@ -265,9 +297,11 @@ namespace SimpleSocketCS
                         {
                             rc = clientSocket.Receive(receiveBuffer);
                             Console.WriteLine("Server: Read {0} bytes", rc);
-                            deserializeDNP3(receiveBuffer);
                             if (rc == 0)
                                 break;
+                            receiveBuffer = receiveBuffer.Where((v, i) => i < rc).ToArray();                         
+                            deserializeDNP3(ref receiveBuffer);
+                            BufferFormatting(ref sendBuffer, receiveBuffer);
                         }
 
                         // Send the indicated number of response messages
