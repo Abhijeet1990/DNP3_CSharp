@@ -53,6 +53,7 @@ using System.Net;
 using System.Net.Sockets;
 using DNP3Simple;
 using System.Text;
+using System.Linq;
 
 /// <summary>
 /// This is a simple TCP and UDP based client.
@@ -66,9 +67,9 @@ namespace SocketClient
         /// This routine repeatedly copies a string message into a byte array until filled.
         /// </summary>
         /// <param name="dataBuffer">Byte buffer to fill with string message</param>
-        /// <param name="message">String message to copy</param>
+        /// <param name="byteMessage">DNP3 message to copy</param>
 
-        static public void BufferFormatting(byte[] dataBuffer, byte[] byteMessage)
+        static public void BufferFormatting(ref byte[] dataBuffer, byte[] byteMessage)
         {
             //byte[] byteMessage = System.Text.Encoding.ASCII.GetBytes(message);
             int index = 0;
@@ -82,6 +83,7 @@ namespace SocketClient
                     // Make sure we don't go past the send buffer length
                     if (index >= dataBuffer.Length)
                     {
+                        dataBuffer = dataBuffer.Where((v, i) => i < byteMessage.Length).ToArray();
                         break;
                     }
                 }
@@ -126,7 +128,6 @@ namespace SocketClient
             SocketType sockType = SocketType.Stream;
             ProtocolType sockProtocol = ProtocolType.Tcp;
             string remoteName = "localhost";
-            string textMessage = "Client: This is a test";
             bool udpConnect = false;
             int remotePort = 5150, bufferSize = 4096;
             Console.WriteLine();
@@ -146,9 +147,6 @@ namespace SocketClient
                                 break;
                             case 'n':       // Destination address to connect to or send to
                                 remoteName = args[++i];
-                                break;
-                            case 'm':       // Text message to put into the send buffer
-                                textMessage = args[++i];
                                 break;
                             case 'p':       // Port number for the destination
                                 remotePort = System.Convert.ToInt32(args[++i]);
@@ -203,7 +201,7 @@ namespace SocketClient
 
             DNP3Simple.TransportLayer tl = new DNP3Simple.TransportLayer();
             tl.TransportData = al.ApplicationData;
-            tl.seq = 2;
+            tl.seq = 1;
             tl.FIN = 1;
             tl.FIR = 1;
             tl.serialize(ref tl.TransportData);
@@ -229,7 +227,7 @@ namespace SocketClient
             Console.WriteLine("DNP3 data using String Builder " +sb.ToString());
 
             //FormatBuffer(sendBuffer, textMessage);
-            BufferFormatting(sendBuffer, ll.LinkData);
+            BufferFormatting(ref sendBuffer, ll.LinkData);
             try
             {
                 // Try to resolve the remote host name or address
