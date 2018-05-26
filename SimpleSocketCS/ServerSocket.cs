@@ -302,7 +302,7 @@ namespace SimpleSocketCS
                             receiveBuffer = receiveBuffer.Where((v, i) => i < rc).ToArray();                         
                             deserializeDNP3(ref receiveBuffer);
                             BufferFormatting(ref sendBuffer, receiveBuffer);
-                        }
+                        
 
                         // Send the indicated number of response messages
                         Console.WriteLine("Server: Preparing to send using Send()...");
@@ -312,7 +312,7 @@ namespace SimpleSocketCS
                             Console.WriteLine("Server: Sent {0} bytes", rc);
 
                         }
-
+                        }
                         // Shutdown the client connection
                         clientSocket.Shutdown(SocketShutdown.Send);
                         Console.WriteLine("Server: Shutdown() is OK...");
