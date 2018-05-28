@@ -39,6 +39,7 @@
 //          Executable_file_name -n 10.10.10.1 -p 5150 -t udp -x 512
 //
 
+using DNP3Simple;
 using System;
 using System.Linq;
 using System.Net;
@@ -87,6 +88,18 @@ namespace SimpleSocketCS
 
         static void deserializeDNP3(ref byte[] buffer)
         {
+            var sb = new StringBuilder("new byte[] { ");
+            for (var i = 0; i < buffer.Length; i++)
+            {
+                var b = buffer[i];
+                sb.Append(b);
+                if (i < buffer.Length - 1)
+                {
+                    sb.Append(", ");
+                }
+            }
+            sb.Append(" }");
+
             DNP3Simple.LinkLayer ll = new DNP3Simple.LinkLayer();
             ll.deserialize(ref buffer);
 
@@ -95,52 +108,21 @@ namespace SimpleSocketCS
 
             DNP3Simple.ApplicationLayer al = new DNP3Simple.ApplicationLayer();
             al.deserialize(ref buffer);
-
-            var sb = new StringBuilder("new byte[] { ");
-            for (var i = 0; i < al.ApplicationData.Length; i++)
-            {
-                var b = al.ApplicationData[i];
-                sb.Append(b);
-                if (i < al.ApplicationData.Length - 1)
-                {
-                    sb.Append(", ");
-                }
-            }
-            sb.Append(" }");
+           
             Console.WriteLine("DNP3 Application request " + sb.ToString());
-            DNP3Response(tl.seq, ll.source, ll.destination, ref buffer);
-
+            DNP3Response( ll, tl, al, ref buffer);
 
         }
 
-        static void DNP3Response(byte transportSeq, UInt16 src, UInt16 dest, ref byte[] buffer)
+        static void DNP3Response(LinkLayer ll,TransportLayer tl,ApplicationLayer al , ref byte[] buffer)
         {
-            // we will send the DNP3 request
-            DNP3Simple.ApplicationLayer al = new DNP3Simple.ApplicationLayer();
-            al.InternalIndications = 0x8000; // Device Restart for READ binary input change REQUEST
-            byte[] data = new byte[]{ 0x00, 0x00 };
-            data[1] = (byte)(al.InternalIndications & 0xFF);
-            data[0] = (byte)((al.InternalIndications >> 8) & 0xFF);
-            al.ApplicationData = data;
-            al.FunctionCode = 0x81; // Function Code 81 is for RESPONSE
-            al.ApplicationControl = 0xc2;
-            al.serialize(ref al.ApplicationData);
-
-            DNP3Simple.TransportLayer tl = new DNP3Simple.TransportLayer();
-            tl.TransportData = al.ApplicationData;
-            tl.seq = (byte)(transportSeq + 1);
-            tl.FIN = 1;
-            tl.FIR = 1;
-            tl.serialize(ref tl.TransportData);
-
-            DNP3Simple.LinkLayer ll = new DNP3Simple.LinkLayer();
-            ll.LinkData = tl.TransportData;
-            ll.source = dest;
-            ll.destination = src;
-            ll.controlByte = 0x44; // Unconfirmed User data
-            ll.serialize(ref ll.LinkData);
-
-            buffer = ll.LinkData;
+           
+            var appData = ApplicationLayer.ApplicationResponse(al);
+            al.ApplicationData = appData;
+            var transData = TransportLayer.TransportResponse(tl,al);
+            tl.TransportData = transData;
+            var linkData = LinkLayer.LinkResponse(ll,tl);
+            buffer = linkData;
         }
 
         /// <summary>
@@ -295,6 +277,7 @@ namespace SimpleSocketCS
 
                         while (true)
                         {
+                            if (!clientSocket.IsBound) break;
                             rc = clientSocket.Receive(receiveBuffer);
                             Console.WriteLine("Server: Read {0} bytes", rc);
                             if (rc == 0)
@@ -312,6 +295,7 @@ namespace SimpleSocketCS
                             Console.WriteLine("Server: Sent {0} bytes", rc);
 
                         }
+                        
                         }
                         // Shutdown the client connection
                         clientSocket.Shutdown(SocketShutdown.Send);
