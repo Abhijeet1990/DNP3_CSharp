@@ -54,6 +54,7 @@ using System.Net.Sockets;
 using DNP3Simple;
 using System.Text;
 using System.Linq;
+using System.Threading;
 
 /// <summary>
 /// This is a simple TCP and UDP based client.
@@ -193,24 +194,29 @@ namespace SocketClient
             // Format the string message into the send buffer
 
             // we will send the DNP3 request
-            DNP3Simple.ApplicationLayer al = new DNP3Simple.ApplicationLayer();
+            ApplicationLayer al = new ApplicationLayer();
             al.ApplicationData = new byte[] { 0x02, 0x00, 0x06};
-            al.FunctionCode = 0x01;
+            al.FunctionCode = (byte)FunctionCode.READ; // Read 
             al.ApplicationControl = 0xc2;
             al.serialize(ref al.ApplicationData);
 
-            DNP3Simple.TransportLayer tl = new DNP3Simple.TransportLayer();
+            TransportLayer tl = new TransportLayer();
             tl.TransportData = al.ApplicationData;
             tl.seq = 1;
             tl.FIN = 1;
             tl.FIR = 1;
             tl.serialize(ref tl.TransportData);
 
-            DNP3Simple.LinkLayer ll = new DNP3Simple.LinkLayer();
+            LinkLayer ll = new LinkLayer();
             ll.LinkData = tl.TransportData;
             ll.source = 3;
             ll.destination = 4;
-            ll.controlByte = 0xc4;
+            ll.dir = (byte)DIR.MASTER;
+            ll.prm = (byte)PRM.INITIATED;
+            ll.fcb = (byte)FCB.set;
+            ll.fcv = (byte)FCV.set;
+            ll.functionCode = (byte)PrimaryFunctionCode.PRI_CONFIRMED_USER_DATA;
+            ll.controlByte = ll.GetControlByte(true);
             ll.serialize(ref ll.LinkData);
 
             var sb = new StringBuilder("new byte[] { ");
@@ -278,56 +284,82 @@ namespace SocketClient
                 {
                     try
                     {
-                        // Send the request to the server
-                        if ((sockProtocol == ProtocolType.Udp) && (udpConnect == false))
+                        new Thread(() =>
                         {
-                            clientSocket.SendTo(sendBuffer, destination);
-                            Console.WriteLine("Client: SendTo() is OK...UDP...");
-                        }
-                        else
-                        {
-                            rc = clientSocket.Send(sendBuffer);
-                            Console.WriteLine("Client: send() is OK...TCP...");
-                            Console.WriteLine("Client: Sent request of {0} bytes", rc);
-
-                            // For TCP, shutdown sending on our side since the client won't send any more data
-                            if (sockProtocol == ProtocolType.Tcp)
+                            int sendCount = 0;
+                            while (true && sendCount <1)
                             {
-                                clientSocket.Shutdown(SocketShutdown.Send);
-                                Console.WriteLine("Client: Shutdown() is OK...");
+                                // Send the request to the server
+                                if ((sockProtocol == ProtocolType.Udp) && (udpConnect == false))
+                                {
+                                    clientSocket.SendTo(sendBuffer, destination);
+                                    sendCount++;
+                                    Console.WriteLine("Client: SendTo() is OK...UDP...");
+                                }
+                                else
+                                {
+                                    rc = clientSocket.Send(sendBuffer);
+                                    sendCount++;
+                                    Console.WriteLine("Client: send() is OK...TCP...");
+                                    Console.WriteLine("Client: Sent request of {0} bytes", rc);
+
+                                    // For TCP, shutdown sending on our side since the client won't send any more data
+                                    if (sockProtocol == ProtocolType.Tcp)
+                                    {
+                                        //clientSocket.Shutdown(SocketShutdown.Send);
+                                        //Console.WriteLine("Client: Shutdown() is OK...");
+                                    }
+                                }
                             }
-                        }
+                        }).Start();
 
                         // Receive data in a loop until the server closes the connection. For
                         //    TCP this occurs when the server performs a shutdown or closes
                         //    the socket. For UDP, we'll know to exit when the remote host
-                       //    sends a zero byte datagram.
-                        while (true)
+                        //    sends a zero byte datagram.
+                        new Thread(() =>
                         {
-                            if ((sockProtocol == ProtocolType.Tcp) || (udpConnect == true))
+                            while (true)
                             {
-                                rc = clientSocket.Receive(recvBuffer);
-                                Console.WriteLine("Client: Receive() is OK...");
-                                Console.WriteLine("Client: Read {0} bytes", rc);
+                                
+                                if ((sockProtocol == ProtocolType.Tcp) || (udpConnect == true))
+                                {
+                                    rc = clientSocket.Receive(recvBuffer);
+                                    Console.WriteLine("Client: Receive() is OK...");
+                                    Console.WriteLine("Client: Read {0} bytes", rc);
+                                    recvBuffer = recvBuffer.Where((v, i) => i < rc).ToArray();
+                                    var sbs = new StringBuilder("new byte[] { ");
+                                    for (var i = 0; i < recvBuffer.Length; i++)
+                                    {
+                                        var b = recvBuffer[i];
+                                        sbs.Append(b);
+                                        if (i < recvBuffer.Length - 1)
+                                        {
+                                            sbs.Append(", ");
+                                        }
+                                    }
+                                    sbs.Append(" }");
+                                    Console.WriteLine("DNP3 Application response " + sbs.ToString());
+                                }
+                                else
+                                {
+                                    IPEndPoint fromEndPoint = new IPEndPoint(destination.Address, 0);
+                                    Console.WriteLine("Client: IPEndPoint() is OK...");
+                                    EndPoint castFromEndPoint = (EndPoint)fromEndPoint;
+                                    rc = clientSocket.ReceiveFrom(recvBuffer, ref castFromEndPoint);
+                                    Console.WriteLine("Client: ReceiveFrom() is OK...");
+                                    fromEndPoint = (IPEndPoint)castFromEndPoint;
+                                    Console.WriteLine("Client: Read {0} bytes from {1}", rc, fromEndPoint.ToString());
+                                }
+                               // Exit loop if server indicates shutdown
+                               if (rc == 0)
+                                {
+                                    clientSocket.Close();
+                                    Console.WriteLine("Client: Close() is OK...");
+                                    break;
+                                }
                             }
-                            else
-                            {
-                                IPEndPoint fromEndPoint = new IPEndPoint(destination.Address, 0);
-                                Console.WriteLine("Client: IPEndPoint() is OK...");
-                                EndPoint castFromEndPoint = (EndPoint)fromEndPoint;
-                                rc = clientSocket.ReceiveFrom(recvBuffer, ref castFromEndPoint);
-                                Console.WriteLine("Client: ReceiveFrom() is OK...");
-                                fromEndPoint = (IPEndPoint)castFromEndPoint;
-                                Console.WriteLine("Client: Read {0} bytes from {1}", rc, fromEndPoint.ToString());
-                            }
-                            // Exit loop if server indicates shutdown
-                            if (rc == 0)
-                            {
-                                clientSocket.Close();
-                                Console.WriteLine("Client: Close() is OK...");
-                                break;
-                            }
-                        }
+                        }).Start();
                     }
                    catch (SocketException err)
                     {
